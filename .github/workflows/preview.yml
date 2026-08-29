@@ -1,0 +1,44 @@
+name: Preview
+
+on:
+  pull_request:
+
+# `pages-action` posts the preview URL as a comment on the PR, so it needs
+# write access to pull requests in addition to read access to the repo contents.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    name: Cloudflare Pages preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - run: npm ci
+        working-directory: webui
+
+      # Esmeralda is the default network; the template address is hardcoded in
+      # webui/lib/config.ts. No /walletd proxy here: previews are static and don't
+      # connect to a wallet daemon yet.
+      - name: Build
+        run: npm run build
+        working-directory: webui
+        env:
+          VITE_NETWORK: Esmeralda
+
+      - name: Deploy preview
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: tariorg
+          directory: webui/build/client
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}

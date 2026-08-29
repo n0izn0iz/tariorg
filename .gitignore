@@ -1,0 +1,10 @@
+/tari_ootle_walletd-*
+target/
+/state.json
+.DS_Store
+/tari-ootle
+/ootle.ts
+/.npm-cache
+/.swarm-log-check
+/.e2e-log-check
+/*.zip

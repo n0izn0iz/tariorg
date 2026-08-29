@@ -1,0 +1,109 @@
+name: E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  e2e:
+    name: End-to-end (localnet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tariorg template uses nightly-only features (integer_casts,
+      # float_conversions), so e2e-infra (which builds that template) needs
+      # nightly too.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          # e2e-infra builds the Organization template to WASM.
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      # The tari-ootle / minotari release bundles are ~hundreds of MB; cache them
+      # so cold downloads don't dominate every run. Bump the key when the pinned
+      # versions in tariorg-cli/src/e2e_infra.rs change.
+      - uses: actions/cache@v4
+        with:
+          path: webui/.localnet/bin
+          key: tari-ootle-bin-linux-0.40.0-4e71037
+
+      # `extract_bundles` shells out to `unzip`.
+      - name: Install unzip
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: Build CLI
+        run: cargo build -p tariorg_cli --release
+
+      # e2e-infra is a foreground process: download bundles, build the template,
+      # boot the swarm (minotari + validator + indexer + walletd), fund the
+      # default account, publish the template, then write webui/.env.local and
+      # cypress/fixtures/localnet.json. Run it in the background and wait for the
+      # "localnet is up" marker before starting the webui.
+      - name: Boot localnet (background)
+        run: |
+          ./target/release/tariorg-cli e2e-infra > /tmp/e2e-infra.log 2>&1 &
+          echo $! > /tmp/e2e-infra.pid
+
+      - name: Wait for localnet
+        run: |
+          for i in $(seq 1 180); do
+            if grep -q "localnet is up" /tmp/e2e-infra.log; then
+              echo "✅ localnet is up"
+              exit 0
+            fi
+            if ! kill -0 "$(cat /tmp/e2e-infra.pid)" 2>/dev/null; then
+              echo "❌ e2e-infra exited early"
+              cat /tmp/e2e-infra.log
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "❌ timed out waiting for localnet"
+          cat /tmp/e2e-infra.log
+          exit 1
+
+      - name: Install webui deps
+        run: npm ci
+        working-directory: webui
+
+      # Uses the existing dev-server + Cypress flow (the Vite dev server proxies
+      # /walletd to the localnet wallet daemon). Keeping this on dev for now; the
+      # prod build needs a /walletd reverse proxy that doesn't exist yet.
+      - name: Run Cypress
+        run: npm run test:e2e
+        working-directory: webui
+
+      - name: Upload e2e-infra log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-infra-log
+          path: /tmp/e2e-infra.log
+
+      # The swarm daemon writes its own log (wallet daemon / indexer / validator
+      # output). When boot or walletd readiness fails, this is the log that
+      # actually says why — e.g. a wallet daemon bind-address/port mismatch.
+      - name: Upload swarm log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swarm-log
+          path: webui/.localnet/swarm.log
+          if-no-files-found: warn
+
+      - name: Upload Cypress screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-screenshots
+          path: webui/cypress/screenshots

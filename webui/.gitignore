@@ -1,0 +1,13 @@
+.DS_Store
+.env
+.env.local
+.env.localnet
+.localnet/
+/cypress/fixtures/localnet.json
+/cypress/screenshots/
+/cypress/videos/
+/node_modules/
+
+# React Router
+/.react-router/
+/build/

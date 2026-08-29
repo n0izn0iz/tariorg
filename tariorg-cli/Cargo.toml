@@ -1,0 +1,38 @@
+[package]
+name = "tariorg_cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "tariorg-cli"
+path = "src/main.rs"
+
+[dependencies]
+tariorg_types = { path = "../tariorg_types" }
+ootle-rs = "0.21"
+tari_ootle_transaction = { version = "0.39", features = ["serde"] }
+tari_ootle_common_types = "0.39"
+tari_template_lib_types = "0.31"
+tari_template_lib = "0.31"
+tari_crypto = "0.23"
+tari_utilities = "0.10"
+tari_bor = "0.15"
+
+random-name = "0.1"
+
+anyhow = "1.0"
+clap = { version = "4", features = ["derive"] }
+dialoguer = "0.12"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "signal"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+minicbor = { version = "2.3.0", features = ["alloc", "half"] }
+
+# e2e-infra subcommand: downloads release bundles, boots the swarm daemon as a
+# managed child process, and drives wallet/indexer JSON-RPC.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = "0.3"

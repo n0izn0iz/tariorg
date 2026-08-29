@@ -1,0 +1,18 @@
+[package]
+name = "tariorg"
+version = "0.1.0"
+authors = ["norman <7917064+n0izn0iz@users.noreply.github.com>"]
+edition = "2024"
+
+
+[dependencies]
+base64 = "0.23.1"
+tari_template_lib = { version = "0.31" }
+tariorg_types = { path = "../tariorg_types" }
+
+[dev-dependencies]
+tari_template_test_tooling = "0.39"
+
+
+[lib]
+crate-type = ["cdylib"]

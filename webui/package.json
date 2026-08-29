@@ -1,0 +1,51 @@
+{
+  "name": "webui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "react-router build",
+    "dev": "react-router dev",
+    "start": "react-router-serve ./build/server/index.js",
+    "typecheck": "react-router typegen && tsc",
+    "cy:open": "cypress open",
+    "cy:run": "cypress run",
+    "test:e2e": "start-server-and-test 'npm run dev' http://127.0.0.1:5173 'cypress run'"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@fontsource/roboto": "^5.3.0",
+    "@mui/icons-material": "^9.4.0",
+    "@mui/material": "^9.4.0",
+    "@react-router/node": "^8",
+    "@react-router/serve": "^8",
+    "@tanstack/react-query": "^5.102.8",
+    "@tari-project/ootle": "^0.4.0",
+    "@tari-project/ootle-indexer": "^0.4.0",
+    "@tari-project/ootle-secret-key-wallet": "^0.4.0",
+    "@tari-project/ootle-wallet-daemon-signer": "^0.4.0",
+    "@tari-project/ootle-wasm": "^0.39.3",
+    "cbor2": "^2.3.0",
+    "esbuild": "^0.28.2",
+    "isbot": "^5.1.36",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router": "^8",
+    "rollup": "^4.63.1",
+    "vite-plugin-node-polyfills": "^0.28.0",
+    "vite-plugin-wasm": "^3.6.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^8",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^22",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "cypress": "^13.17.0",
+    "start-server-and-test": "^2.1.5",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2"
+  }
+}

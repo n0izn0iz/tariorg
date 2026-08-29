@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-webui:
+    name: Deploy web UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - run: npm ci
+        working-directory: webui
+
+      # Esmeralda is the default network and the template address is hardcoded in
+      # webui/lib/config.ts (updated by hand when a new template is published).
+      - name: Build
+        run: npm run build
+        working-directory: webui
+        env:
+          VITE_NETWORK: Esmeralda
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy build/client --project-name=tariorg
+          workingDirectory: webui
+          # wrangler-action defaults to wrangler@3.90.0, which conflicts with
+          # @react-router/dev's peerOptional wrangler@^4.0.0 and fails ERESOLVE.
+          wranglerVersion: "4.129.0"
