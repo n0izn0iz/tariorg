@@ -127,7 +127,7 @@ export function Welcome() {
             component="h1"
             sx={{ maxWidth: 720, textWrap: "balance" }}
           >
-            Decentralized organizations, on-chain.
+            Organizations, on-chain.
           </Typography>
 
           <Typography
