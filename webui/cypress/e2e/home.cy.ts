@@ -4,12 +4,10 @@ describe("home page", () => {
   });
 
   it("renders the hero", () => {
-    cy.contains("h1", "Decentralized organizations, on-chain.").should(
+    cy.contains("h1", "Organizations, on-chain.").should("be.visible");
+    cy.contains("Create, govern, and coordinate organizations on Tari.").should(
       "be.visible",
     );
-    cy.contains(
-      "Create, govern, and coordinate organizations on Tari.",
-    ).should("be.visible");
   });
 
   it("renders the feature cards", () => {
