@@ -78,7 +78,15 @@ export async function submitProposal(
   // transaction gets double-signed with the same key.
   unsignedTx.is_seal_signer_authorized = true;
 
-  const txId = await session.submitTransaction(unsignedTx, [orgId]);
+  // A Send action embeds the recipient's component address in the argument, and
+  // the engine requires any referenced root substate to be resolvable from the
+  // declared inputs. The walletd backend auto-detects it (`detect_inputs`); the
+  // browser backend resolves inputs manually, so list the recipient as a target.
+  const targets =
+    action.type === ProposalActionType.Send
+      ? [orgId, action.recipient]
+      : [orgId];
+  const txId = await session.submitTransaction(unsignedTx, targets);
 
   const res = await waitForTransaction(provider, txId);
   if (res.result.Finalized.abort_details) {
