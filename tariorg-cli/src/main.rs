@@ -101,6 +101,18 @@ enum Commands {
     AddUser,
     /// Deposit an user's tTaris into the organization, TODO: support depositing any resource
     Deposit { amount: f64 },
+    /// Deploy the demo faucet (publish template + create + fund) and save its address
+    DeployFaucet {
+        /// Path to the faucet WASM
+        #[arg(
+            long,
+            default_value = "target/wasm32-unknown-unknown/release/faucet.wasm"
+        )]
+        wasm: PathBuf,
+        /// Initial funding, in whole TARI
+        #[arg(long, default_value_t = 100_000)]
+        amount: u64,
+    },
     /// Set up or tear down the localnet infrastructure used by the webui e2e tests
     E2eInfra(e2e_infra::E2eInfraArgs),
 }
@@ -142,6 +154,9 @@ struct State {
     template_address: Option<String>,
     /// Organization component address, stored as "component_<hex>"
     component_address: Option<ComponentAddress>,
+    /// Faucet component address, stored as "component_<hex>"
+    #[serde(default)]
+    faucet_address: Option<ComponentAddress>,
     #[serde(default)]
     users: Vec<User>,
 }
@@ -290,6 +305,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Execute { proposal_id } => cmd_execute(&mut state, proposal_id).await?,
         Commands::Deposit { amount } => cmd_deposit(&mut state, amount).await?,
+        Commands::DeployFaucet { wasm, amount } => {
+            cmd_deploy_faucet(&state_path, &mut state, wasm, amount).await?
+        }
         Commands::E2eInfra(args) => e2e_infra::run(args).await?,
         Commands::ProposeSend {
             recipient,
@@ -510,6 +528,81 @@ async fn cmd_create(state_path: &Path, state: &mut State) -> anyhow::Result<()> 
 
     state.component_address = Some(component_addr);
 
+    save_state(state_path, state)?;
+
+    Ok(())
+}
+
+async fn cmd_deploy_faucet(
+    state_path: &Path,
+    state: &mut State,
+    wasm_path: PathBuf,
+    amount_tari: u64,
+) -> anyhow::Result<()> {
+    if !state.is_initialized() {
+        anyhow::bail!("Wallet not initialized. Run `init` first.");
+    }
+
+    let wallet = wallet_from_state(state)?;
+    let indexer_url = state.indexer_url.clone();
+
+    let mut provider = ProviderBuilder::new()
+        .wallet(wallet)
+        .connect(&indexer_url)
+        .await?;
+
+    let account_addr = provider.default_signer_address().to_account_address();
+    let wasm = std::fs::read(&wasm_path)?;
+
+    // 1. Publish the faucet template.
+    println!("📤 Publishing faucet template...");
+    let receipt = build_and_send(
+        &mut provider,
+        |builder| {
+            builder
+                .pay_fee_from_component(account_addr, 1_000_000u64)
+                .publish_template(wasm)
+        },
+        WantList::new().add_vault_for_resource(account_addr, TARI_TOKEN, true),
+    )
+    .await?;
+
+    let template_addr = receipt
+        .diff_summary
+        .upped
+        .iter()
+        .find_map(|s| s.substate_id.as_template().map(|t| t.as_template_address()))
+        .ok_or_else(|| anyhow::anyhow!("No template address in publish receipt"))?;
+    println!("📄 Faucet template address: {template_addr}");
+
+    // 2. Create and fund the faucet.
+    let funding = Amount::from(amount_tari * 1_000_000u64);
+    println!("🚰 Creating faucet funded with {amount_tari} TARI...");
+    let receipt = build_and_send(
+        &mut provider,
+        |builder| {
+            builder
+                .pay_fee_from_component(account_addr, 10_000u64)
+                .call_method(account_addr, "withdraw", args![TARI_TOKEN, funding])
+                .put_last_instruction_output_on_workspace("bucket")
+                .call_function(template_addr, "new", args![Workspace("bucket")])
+        },
+        WantList::new().add_vault_for_resource(account_addr, TARI_TOKEN, true),
+    )
+    .await?;
+
+    let faucet_addr = receipt
+        .diff_summary
+        .upped
+        .iter()
+        .find_map(|s| s.substate_id.as_component_address())
+        .ok_or_else(|| anyhow::anyhow!("No component address in receipt"))?;
+
+    println!(
+        "🎉 Faucet component: {faucet_addr} (saved to {})",
+        state_path.display()
+    );
+    state.faucet_address = Some(faucet_addr);
     save_state(state_path, state)?;
 
     Ok(())

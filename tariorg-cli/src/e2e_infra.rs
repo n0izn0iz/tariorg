@@ -16,9 +16,12 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine as _;
 use clap::{Args, ValueEnum};
+use ootle_rs::{Epoch, Network};
 use reqwest::Client;
 use serde_json::{Value, json};
 use sha2::Digest as _;
+use tari_ootle_transaction::{TransactionBuilder, args};
+use tari_template_lib_types::{Amount, ComponentAddress, TemplateAddress, constants::TARI_TOKEN};
 use tracing::{info, warn};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,6 +45,11 @@ const DAEMON_AUTH_WEBAUTHN: &str = "webauthn";
 /// `tari_ootle_walletd` exit with "OS keyring not supported". Overriding the
 /// keyring with a fixed password lets it start without one.
 const WALLETD_PASSWORD: &str = "password";
+
+/// How much tTARI the localnet faucet is funded with on startup, in whole TARI.
+/// The default account only receives 1,000 TARI from the built-in faucet, so
+/// this must leave enough headroom for fees and the other e2e tests.
+const FAUCET_FUNDING_TARI: u64 = 800;
 
 /// The swarm daemon's own JSON-RPC webserver port (default from its config's
 /// `webserver.bind_address`). Used to discover the wallet/indexer ports.
@@ -90,6 +98,7 @@ struct Paths {
     swarm_dir: PathBuf,
     log_file: PathBuf,
     wasm: PathBuf,
+    faucet_wasm: PathBuf,
     env_local: PathBuf,
     fixtures_dir: PathBuf,
     fixture: PathBuf,
@@ -107,6 +116,7 @@ impl Paths {
             swarm_dir: base_dir.join("swarm"),
             log_file: base_dir.join("swarm.log"),
             wasm: workspace_dir.join("target/wasm32-unknown-unknown/release/tariorg.wasm"),
+            faucet_wasm: workspace_dir.join("target/wasm32-unknown-unknown/release/faucet.wasm"),
             env_local: webui_dir.join(".env.local"),
             fixtures_dir: webui_dir.join("cypress/fixtures"),
             fixture: webui_dir.join("cypress/fixtures/localnet.json"),
@@ -140,7 +150,7 @@ pub async fn run(args: E2eInfraArgs) -> Result<()> {
     download_bundles(&client, &paths).await?;
     extract_bundles(&paths)?;
     resign_jit_binaries(&paths)?;
-    build_template(&paths)?;
+    build_templates(&paths)?;
 
     clean_swarm_state(&paths)?;
 
@@ -180,6 +190,7 @@ pub async fn run(args: E2eInfraArgs) -> Result<()> {
 struct Setup {
     pubkey: String,
     template_addr: String,
+    faucet_addr: String,
     indexer_url: String,
     walletd_port: u16,
     api_key: Option<String>,
@@ -249,9 +260,30 @@ async fn setup(
     let template_addr = publish_template(
         client,
         &walletd_url,
-        paths,
+        &paths.wasm,
         &component_address,
         &pubkey,
+        &setup_token,
+    )
+    .await?;
+
+    // Publish the demo faucet template and create a funded faucet component so
+    // the webui demo-account flow (and its e2e test) exercise the same custom
+    // faucet on LocalNet as on Esmeralda, instead of the built-in tXTR faucet.
+    let faucet_template_addr = publish_template(
+        client,
+        &walletd_url,
+        &paths.faucet_wasm,
+        &component_address,
+        &pubkey,
+        &setup_token,
+    )
+    .await?;
+    let faucet_addr = create_faucet(
+        client,
+        &walletd_url,
+        &component_address,
+        &faucet_template_addr,
         &setup_token,
     )
     .await?;
@@ -259,6 +291,7 @@ async fn setup(
     Ok(Setup {
         pubkey,
         template_addr,
+        faucet_addr,
         indexer_url,
         walletd_port,
         api_key,
@@ -532,31 +565,36 @@ fn resign_jit_binaries(paths: &Paths) -> Result<()> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Template build
 // ─────────────────────────────────────────────────────────────────────────────
-fn build_template(paths: &Paths) -> Result<()> {
+fn build_templates(paths: &Paths) -> Result<()> {
     let workspace_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .context("no parent of CARGO_MANIFEST_DIR")?;
+    build_wasm(workspace_dir, "tariorg", &paths.wasm, "Organization")?;
+    build_wasm(workspace_dir, "faucet", &paths.faucet_wasm, "faucet")?;
+    Ok(())
+}
 
-    info!("building the Organization template (WASM)");
+fn build_wasm(workspace_dir: &Path, package: &str, output: &Path, label: &str) -> Result<()> {
+    info!("building the {label} template (WASM)");
     let status = std::process::Command::new("cargo")
         .args([
             "build",
             "-p",
-            "tariorg",
+            package,
             "--target",
             "wasm32-unknown-unknown",
             "--release",
         ])
         .current_dir(workspace_dir)
         .status()
-        .context("failed to run cargo build")?;
+        .with_context(|| format!("failed to run cargo build -p {package}"))?;
     if !status.success() {
-        bail!("cargo build failed");
+        bail!("cargo build -p {package} failed");
     }
-    if !paths.wasm.exists() {
-        bail!("WASM output not found at {}", paths.wasm.display());
+    if !output.exists() {
+        bail!("WASM output not found at {}", output.display());
     }
-    info!("template built: {}", paths.wasm.display());
+    info!("template built: {}", output.display());
     Ok(())
 }
 
@@ -1131,12 +1169,12 @@ async fn wait_for_transaction(
 async fn publish_template(
     client: &Client,
     walletd_url: &str,
-    paths: &Paths,
+    wasm_path: &Path,
     component_address: &str,
     pubkey: &str,
     token: &str,
 ) -> Result<String> {
-    let wasm = std::fs::read(&paths.wasm)?;
+    let wasm = std::fs::read(wasm_path)?;
     let binary = base64::engine::general_purpose::STANDARD.encode(&wasm);
 
     // 1. Dry-run to get an accurate fee estimate.
@@ -1202,6 +1240,84 @@ async fn publish_template(
     }
 }
 
+/// Create a funded demo faucet component on the localnet. Uses the wallet
+/// daemon's `transactions.submit_instruction` (which seals and pays fees with
+/// the fee account) to run `withdraw` + `new` in one transaction, then reads
+/// the created component address from the `std.component.created` event.
+async fn create_faucet(
+    client: &Client,
+    walletd_url: &str,
+    account_component_address: &str,
+    faucet_template_address: &str,
+    token: &str,
+) -> Result<String> {
+    use std::str::FromStr;
+
+    let account_addr = ComponentAddress::from_str(account_component_address).map_err(|e| {
+        anyhow!("invalid account component address {account_component_address:?}: {e}")
+    })?;
+    let template_addr = parse_template_address(faucet_template_address)?;
+    let funding = Amount::from(FAUCET_FUNDING_TARI * 1_000_000u64);
+
+    // Build only the "main" instructions; the wallet daemon adds the fee
+    // instruction and seals the transaction for us. The network/epoch values are
+    // discarded by `into_instructions`, so any valid ones will do.
+    let instructions = TransactionBuilder::new(Network::LocalNet, Epoch(100))
+        .call_method(account_addr, "withdraw", args![TARI_TOKEN, funding])
+        .put_last_instruction_output_on_workspace("bucket")
+        .call_function(template_addr, "new", args![Workspace("bucket")])
+        .into_instructions();
+
+    info!("creating and funding the faucet component ({FAUCET_FUNDING_TARI} TARI)");
+    let body = json_rpc_bearer(
+        client,
+        walletd_url,
+        "transactions.submit_instruction",
+        json!({
+            "instructions": instructions,
+            "fee_account": { "ComponentAddress": account_component_address },
+            "max_fee": 1_000_000,
+            "override_inputs": true,
+        }),
+        Some(token),
+    )
+    .await?;
+    let tx_id = body["result"]["transaction_id"]
+        .as_str()
+        .ok_or_else(|| anyhow!("submit_instruction returned no transaction_id: {body}"))?
+        .to_string();
+
+    wait_for_transaction(client, walletd_url, &tx_id, token).await?;
+
+    // The faucet is the only component created by the transaction; find it in
+    // the finalize events.
+    let result = json_rpc_bearer(
+        client,
+        walletd_url,
+        "transactions.get_result",
+        json!({ "transaction_id": tx_id }),
+        Some(token),
+    )
+    .await?;
+    let events = result["result"]["result"]["events"]
+        .as_array()
+        .ok_or_else(|| anyhow!("no events in transaction result: {result}"))?;
+    for event in events {
+        if event["topic"].as_str() == Some("std.component.created")
+            && let Some(addr) = event["substate_id"].as_str()
+        {
+            return Ok(addr.to_string());
+        }
+    }
+    bail!("faucet component address not found in transaction result");
+}
+
+fn parse_template_address(s: &str) -> Result<TemplateAddress> {
+    use std::str::FromStr;
+    let hex = s.strip_prefix("template_").unwrap_or(s);
+    TemplateAddress::from_str(hex).map_err(|e| anyhow!("invalid template address {s:?}: {e}"))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Config output
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1218,12 +1334,14 @@ fn write_config(paths: &Paths, setup: &Setup) -> Result<()> {
     let indexer_url = &setup.indexer_url;
     let walletd_port = setup.walletd_port;
     let template_addr = &setup.template_addr;
+    let faucet_addr = &setup.faucet_addr;
     let env = format!(
         "VITE_NETWORK=LocalNet\n\
          VITE_INDEXER_URL={indexer_url}\n\
          VITE_WALLETD_TARGET=http://localhost:{walletd_port}\n\
          {api_key_line}\
-         VITE_TEMPLATE_ADDRESS={template_addr}\n"
+         VITE_TEMPLATE_ADDRESS={template_addr}\n\
+         VITE_FAUCET_ADDRESS={faucet_addr}\n"
     );
     std::fs::write(&paths.env_local, env)?;
 

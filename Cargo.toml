@@ -1,5 +1,5 @@
 [workspace]
-members = ["tariorg", "tariorg_types", "tariorg-cli"]
+members = ["tariorg", "tariorg_types", "tariorg-cli", "faucet"]
 resolver = "2"
 
 [profile.release]

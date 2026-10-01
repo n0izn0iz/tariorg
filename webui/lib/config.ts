@@ -37,6 +37,15 @@ export const ORGANIZATION_TEMPLATE_ADDRESS: string =
   "template_827a6a08f656e30cdf0d95946c5349d4a6e2268d86a2fe1dd5f0660930f67732";
 
 /**
+ * The demo faucet component address used to fund in-browser accounts. The
+ * built-in tXTR faucet is disabled on the live testnet, so we deploy our own
+ * (see `tariorg-cli deploy-faucet`) and point the demo-account flow at it here.
+ * Override with `VITE_FAUCET_ADDRESS`. `tariorg-cli e2e-infra` sets this on
+ * LocalNet too, so the e2e suite exercises the same custom-faucet path.
+ */
+export const FAUCET_ADDRESS: string | undefined = env("VITE_FAUCET_ADDRESS");
+
+/**
  * Optional API key used to authenticate against the wallet daemon JSON-RPC
  * endpoint. When set (e.g. the key minted by `tariorg-cli e2e-infra`), it is
  * used directly. When unset, the webui probes the daemon's configured auth

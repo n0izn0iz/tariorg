@@ -1,8 +1,9 @@
 // In-browser demo account test.
 //
 // Requires:
-//   - A running localnet (walletd + indexer) with the built-in tXTR faucet
-//     deployed at `XTR_FAUCET_COMPONENT_ADDRESS` — see ../../E2E.md.
+//   - A running localnet (walletd + indexer) with a funded custom faucet
+//     component deployed at `VITE_FAUCET_ADDRESS` — see ../../E2E.md.
+//     `tariorg-cli e2e-infra` publishes and funds it during setup.
 
 describe("in-browser demo account", () => {
   it("creates a faucet-funded demo account from the account popover", () => {
