@@ -8,7 +8,7 @@ mod template {
     /// Esmeralda faucet (funded from a modest personal tTARI balance) can serve
     /// many demo accounts. 1 TARI is enough to create an organization and run a
     /// handful of propose/vote/execute rounds (~0.004 TARI per transaction fee).
-    const FAUCET_AMOUNT: u64 = 1 * 1_000_000;
+    const FAUCET_AMOUNT: u64 = 1_000_000;
 
     pub struct Faucet {
         vault: Vault,
