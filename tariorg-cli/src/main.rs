@@ -109,8 +109,8 @@ enum Commands {
             default_value = "target/wasm32-unknown-unknown/release/faucet.wasm"
         )]
         wasm: PathBuf,
-        /// Initial funding, in whole TARI
-        #[arg(long, default_value_t = 100_000)]
+        /// Initial funding, in whole TARI (the faucet gives 1 TARI per claim)
+        #[arg(long, default_value_t = 5_000)]
         amount: u64,
     },
     /// Set up or tear down the localnet infrastructure used by the webui e2e tests

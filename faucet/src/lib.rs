@@ -4,10 +4,11 @@ use tari_template_lib::prelude::*;
 mod template {
     use super::*;
 
-    /// Fixed faucet amount in microtari: 100 TARI per claim. Kept small enough
-    /// that a LocalNet account (which only receives 1,000 TARI from the built-in
-    /// faucet) can fund the faucet for several claims and still pay fees.
-    const FAUCET_AMOUNT: u64 = 100 * 1_000_000;
+    /// Fixed faucet amount in microtari: 1 TARI per claim. Kept small so the
+    /// Esmeralda faucet (funded from a modest personal tTARI balance) can serve
+    /// many demo accounts. 1 TARI is enough to create an organization and run a
+    /// handful of propose/vote/execute rounds (~0.004 TARI per transaction fee).
+    const FAUCET_AMOUNT: u64 = 1 * 1_000_000;
 
     pub struct Faucet {
         vault: Vault,
