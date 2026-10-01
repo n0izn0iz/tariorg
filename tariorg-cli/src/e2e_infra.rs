@@ -149,7 +149,7 @@ pub async fn run(args: E2eInfraArgs) -> Result<()> {
 
     download_bundles(&client, &paths).await?;
     extract_bundles(&paths)?;
-    resign_jit_binaries(&paths)?;
+    resign_binaries(&paths)?;
     build_templates(&paths)?;
 
     clean_swarm_state(&paths)?;
@@ -511,16 +511,21 @@ fn extract_bundles(paths: &Paths) -> Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// macOS code-signing fix for the WASM JIT
+// macOS code-signing fix
 // ─────────────────────────────────────────────────────────────────────────────
-/// On macOS, wasmer's JIT (`sys`/cranelift backend) allocates writable+executable
-/// pages to run WASM. The hardened runtime kills any process that does this
-/// without the `com.apple.security.cs.allow-jit` entitlement, which the release
-/// binaries do not carry. Re-sign the WASM-executing binaries ad-hoc with that
-/// entitlement so they don't die with `SIGKILL (Code Signature Invalid)` the
-/// first time they execute a template (e.g. the account template's constructor
-/// during the faucet claim).
-fn resign_jit_binaries(paths: &Paths) -> Result<()> {
+/// The release binaries are code-signed with a Team ID that differs from the
+/// ad-hoc signature Homebrew's OpenSSL dylibs carry, so dyld refuses to load
+/// `libssl.3.dylib` ("mapping process and mapped file (non-platform) have
+/// different Team IDs"). Re-signing every executable ad-hoc drops the Team ID
+/// so the binaries can load Homebrew libraries.
+///
+/// Separately, wasmer's JIT (`sys`/cranelift backend) allocates
+/// writable+executable pages to run WASM. The hardened runtime kills any process
+/// that does this without the `com.apple.security.cs.allow-jit` entitlement,
+/// which the release binaries do not carry. The WASM-executing binaries
+/// (`tari_validator_node`, `tari_indexer`) get that entitlement on top of the
+/// ad-hoc re-sign.
+fn resign_binaries(paths: &Paths) -> Result<()> {
     if std::env::consts::OS != "macos" {
         return Ok(());
     }
@@ -539,26 +544,56 @@ fn resign_jit_binaries(paths: &Paths) -> Result<()> {
 "#,
     )?;
 
-    for bin in ["tari_validator_node", "tari_indexer"] {
-        let bin_path = paths.bin_dir.join(bin);
-        if !bin_path.exists() {
-            continue;
-        }
-        info!("re-signing {bin} with the allow-jit entitlement");
-        let status = std::process::Command::new("codesign")
-            .arg("--force")
-            .arg("--sign")
-            .arg("-")
-            .arg("--entitlements")
-            .arg(&entitlements)
-            .arg(&bin_path)
-            .status()
-            .with_context(|| format!("failed to run codesign for {bin}"))?;
-        if !status.success() {
-            bail!("codesign failed for {bin}");
+    resign_executables(&paths.bin_dir, &entitlements)
+}
+
+/// Recursively ad-hoc re-sign every executable under `dir`. Binaries that run
+/// WASM (`tari_validator_node`, `tari_indexer`) also get the allow-jit
+/// entitlement.
+fn resign_executables(dir: &Path, entitlements: &Path) -> Result<()> {
+    for entry in
+        std::fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            resign_executables(&path, entitlements)?;
+        } else if is_executable(&path) {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let needs_jit = matches!(name, "tari_validator_node" | "tari_indexer");
+            resign_one(&path, entitlements, needs_jit)?;
         }
     }
+    Ok(())
+}
 
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.is_file()
+        && path
+            .metadata()
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+}
+
+fn resign_one(path: &Path, entitlements: &Path, needs_jit: bool) -> Result<()> {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    info!(
+        "re-signing {name}{}",
+        if needs_jit { " (allow-jit)" } else { "" }
+    );
+    let mut cmd = std::process::Command::new("codesign");
+    cmd.arg("--force").arg("--sign").arg("-");
+    if needs_jit {
+        cmd.arg("--entitlements").arg(entitlements);
+    }
+    cmd.arg(path);
+    let status = cmd
+        .status()
+        .with_context(|| format!("failed to run codesign for {name}"))?;
+    if !status.success() {
+        bail!("codesign failed for {name}");
+    }
     Ok(())
 }
 
