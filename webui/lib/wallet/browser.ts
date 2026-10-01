@@ -14,7 +14,7 @@ import {
   publicKeyFromSecretKey,
 } from "@tari-project/ootle-wasm";
 import type {
-  SubstateRequirement,
+  InputDeclaration,
   UnsignedTransactionV1,
 } from "@tari-project/ootle-ts-bindings";
 import type { IndexerProvider } from "@tari-project/ootle-indexer";
@@ -67,17 +67,21 @@ export class BrowserSession implements AccountSession {
   private async resolveInputs(
     provider: IndexerProvider,
     targets: string[],
-  ): Promise<SubstateRequirement[]> {
+  ): Promise<InputDeclaration[]> {
     // Dedupe so a target that is also the active account (e.g. a Send proposal
     // that refunds the depositor) isn't listed twice as an input.
     const ids = Array.from(
       new Set([this.account.componentAddress, ...targets]),
     );
-    const requirements: SubstateRequirement[] = [];
+    const requirements: InputDeclaration[] = [];
     for (const id of ids) {
-      requirements.push({ substate_id: id, version: null });
+      requirements.push({ substate_id: id, version: null, is_write: true });
       for (const vaultId of await getVaultIdsForAccount(provider, id)) {
-        requirements.push({ substate_id: vaultId, version: null });
+        requirements.push({
+          substate_id: vaultId,
+          version: null,
+          is_write: true,
+        });
       }
     }
     return requirements;
