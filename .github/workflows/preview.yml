@@ -3,11 +3,12 @@ name: Preview
 on:
   pull_request:
 
-# `pages-action` posts the preview URL as a comment on the PR, so it needs
-# write access to pull requests in addition to read access to the repo contents.
+# `wrangler-action` (with `gitHubToken`) creates a GitHub Deployment so the
+# preview URL is linked to the PR, which needs `deployments: write` in addition
+# to read access to the repo contents.
 permissions:
   contents: read
-  pull-requests: write
+  deployments: write
 
 jobs:
   preview:
@@ -35,10 +36,10 @@ jobs:
           VITE_NETWORK: Esmeralda
 
       - name: Deploy preview
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: tariorg
-          directory: webui/build/client
+          command: pages deploy build/client --project-name=tariorg
+          workingDirectory: webui
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
