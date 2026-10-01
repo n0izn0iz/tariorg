@@ -34,7 +34,7 @@ export const INDEXER_URL: string | undefined = env("VITE_INDEXER_URL");
  */
 export const ORGANIZATION_TEMPLATE_ADDRESS: string =
   env("VITE_TEMPLATE_ADDRESS") ??
-  "template_fbeb4a341686fd7b5e9771269f97467034cf25ccd59a959646f4e1df87062db6";
+  "template_827a6a08f656e30cdf0d95946c5349d4a6e2268d86a2fe1dd5f0660930f67732";
 
 /**
  * Optional API key used to authenticate against the wallet daemon JSON-RPC

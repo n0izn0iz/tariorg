@@ -25,10 +25,10 @@ use tracing::{info, warn};
 // Version / release configuration. Bump these together when moving to a new
 // release. COMMIT is the short commit hash embedded in each asset filename.
 // ─────────────────────────────────────────────────────────────────────────────
-const OOTLE_VERSION: &str = "0.40.0";
-const OOTLE_COMMIT: &str = "4e71037";
-const MINOTARI_VERSION: &str = "5.6.0";
-const MINOTARI_COMMIT: &str = "b006631";
+const OOTLE_VERSION: &str = "0.42.0";
+const OOTLE_COMMIT: &str = "a43773e";
+const MINOTARI_VERSION: &str = "6.0.0";
+const MINOTARI_COMMIT: &str = "97aa59e";
 const MINOTARI_NETWORK: &str = "esme"; // esme | mainnet
 const OOTLE_NETWORK: &str = "localnet";
 /// The wallet daemon's `--wallet-daemon-auth` value for the two bootstrap

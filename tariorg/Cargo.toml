@@ -7,11 +7,11 @@ edition = "2024"
 
 [dependencies]
 base64 = "0.23.1"
-tari_template_lib = { version = "0.31" }
+tari_template_lib = { version = "0.33" }
 tariorg_types = { path = "../tariorg_types" }
 
 [dev-dependencies]
-tari_template_test_tooling = "0.39"
+tari_template_test_tooling = "0.42"
 
 
 [lib]

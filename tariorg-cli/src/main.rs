@@ -732,7 +732,11 @@ async fn cmd_deposit(state: &mut State, amount: f64) -> anyhow::Result<()> {
     println!(
         "Funding organization: {} {}",
         amount,
-        res.metadata().get("SYMBOL").unwrap(),
+        res.metadata()
+            .get("SYMBOL")
+            .unwrap()
+            .decode::<String>()
+            .unwrap(),
     );
     let receipt = build_and_send(
         &mut provider,
@@ -902,7 +906,10 @@ async fn cmd_show(state: &State) -> anyhow::Result<()> {
 
                 println!(
                     "    - {}: {} ({})",
-                    res.metadata().get("SYMBOL").unwrap_or("?"),
+                    res.metadata()
+                        .get("SYMBOL")
+                        .map(|cbor| cbor.decode::<String>().unwrap())
+                        .unwrap_or("?".to_string()),
                     amt.to_decimal_string(res.divisibility().into()),
                     res_addr,
                 );
@@ -934,7 +941,10 @@ async fn cmd_show(state: &State) -> anyhow::Result<()> {
 
                 println!(
                     "  - {}: {} ({})",
-                    res.metadata().get("SYMBOL").unwrap_or("?"),
+                    res.metadata()
+                        .get("SYMBOL")
+                        .map(|cbor| cbor.decode::<String>().unwrap())
+                        .unwrap_or("?".to_string()),
                     amt.to_decimal_string(res.divisibility().into()),
                     res_addr,
                 );
