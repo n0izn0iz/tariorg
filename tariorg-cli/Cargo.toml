@@ -9,20 +9,21 @@ path = "src/main.rs"
 
 [dependencies]
 tariorg_types = { path = "../tariorg_types" }
-ootle-rs = "0.21"
-tari_ootle_transaction = { version = "0.39", features = ["serde"] }
-tari_ootle_common_types = "0.39"
-tari_template_lib_types = "0.31"
-tari_template_lib = "0.31"
+ootle-rs = "0.24"
+tari_ootle_transaction = { version = "0.42", features = ["serde"] }
+tari_ootle_common_types = "0.42"
+tari_template_lib_types = "0.33"
+tari_template_lib = "0.33"
 tari_crypto = "0.23"
 tari_utilities = "0.10"
-tari_bor = "0.15"
+tari_bor = "0.16"
 
 random-name = "0.1"
 
 anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
 dialoguer = "0.12"
+tari_indexer_client = "0.43"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "signal"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # The tariorg template uses nightly-only features (integer_casts,
       # float_conversions), so e2e-infra (which builds that template) needs
@@ -23,7 +23,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -32,7 +32,7 @@ jobs:
       # The tari-ootle / minotari release bundles are ~hundreds of MB; cache them
       # so cold downloads don't dominate every run. Bump the key when the pinned
       # versions in tariorg-cli/src/e2e_infra.rs change.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: webui/.localnet/bin
           key: tari-ootle-bin-linux-0.40.0-4e71037
@@ -85,7 +85,7 @@ jobs:
 
       - name: Upload e2e-infra log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-infra-log
           path: /tmp/e2e-infra.log
@@ -95,7 +95,7 @@ jobs:
       # actually says why — e.g. a wallet daemon bind-address/port mismatch.
       - name: Upload swarm log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: swarm-log
           path: webui/.localnet/swarm.log
@@ -103,7 +103,7 @@ jobs:
 
       - name: Upload Cypress screenshots
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cypress-screenshots
           path: webui/cypress/screenshots

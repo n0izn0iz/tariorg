@@ -31,12 +31,13 @@ An **Organization** is a component with:
 
 ### Repository layout
 
-| Directory        | What it is                                                               |
-| ---------------- | ------------------------------------------------------------------------ |
-| `tariorg/`       | The Organization **template** (compiled to WASM) and its template tests. |
-| `tariorg_types/` | Types shared between the template and the CLI.                           |
-| `tariorg-cli/`   | Command-line client (`tariorg-cli`) for managing an organization.        |
-| `webui/`         | React (React Router) SPA for creating and browsing organizations.        |
+| Directory        | What it is                                                                  |
+| ---------------- | --------------------------------------------------------------------------- |
+| `tariorg/`       | The Organization **template** (compiled to WASM) and its template tests.    |
+| `tariorg_types/` | Types shared between the template and the CLI.                              |
+| `tariorg-cli/`   | Command-line client (`tariorg-cli`) for managing an organization.           |
+| `faucet/`        | Demo faucet **template** (compiled to WASM) that funds in-browser accounts. |
+| `webui/`         | React (React Router) SPA for creating and browsing organizations.           |
 
 ## Prerequisites
 
@@ -79,7 +80,15 @@ others) and can also create ephemeral in-browser demo accounts.
 `tariorg-cli` talks directly to the public testnet (Esmeralda) and keeps its
 state in `./state.json` (gitignored — it contains your secret keys).
 
+> The built-in tXTR faucet is disabled on the current testnet, so fresh
+> accounts must be funded out-of-band before `init` can create them.
+
 ```bash
+# Deploy the demo faucet (publishes the template, creates and funds a faucet
+# component, and saves its address to state). Fund it with tTARI you already
+# hold; the web UI points demo accounts at it via VITE_FAUCET_ADDRESS.
+cargo run -p tariorg-cli -- deploy-faucet --amount 1000
+
 # Create an account and fund it from the faucet.
 cargo run -p tariorg-cli -- init
 

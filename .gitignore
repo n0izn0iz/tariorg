@@ -8,3 +8,4 @@ target/
 /.swarm-log-check
 /.e2e-log-check
 /*.zip
+/walletd.plist

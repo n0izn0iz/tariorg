@@ -11,17 +11,19 @@ running it you need a localnet with:
    dev server proxies `/walletd` to.
 2. A running **indexer** reachable by the UI.
 3. The **Organization template** compiled to WASM and published on that network.
-4. A **funded default account** in the wallet daemon.
+4. A **demo faucet** template compiled to WASM, published, and funded with
+   tTARI (the demo-account flow uses it instead of the built-in tXTR faucet).
+5. A **funded default account** in the wallet daemon.
 
-`tariorg-cli e2e-infra` automates all four: it downloads the two release
+`tariorg-cli e2e-infra` automates all of it: it downloads the two release
 bundles a local Ootle network needs — the tari-ootle bundle (wallet daemon,
 indexer, validator node, swarm daemon) and the Minotari L1 suite (base-layer
-node, console wallet, miner) — compiles the Organization template to WASM,
-boots a local swarm (as a managed child process), discovers the
-swarm-allocated wallet daemon + indexer ports, publishes the template through
-the wallet daemon's JSON-RPC, then writes `.env.local` and
-`cypress/fixtures/localnet.json`. It then keeps the network running in the
-foreground until you stop it with `Ctrl+C`.
+node, console wallet, miner) — compiles the Organization and faucet templates
+to WASM, boots a local swarm (as a managed child process), discovers the
+swarm-allocated wallet daemon + indexer ports, publishes both templates and
+creates a funded faucet component through the wallet daemon's JSON-RPC, then
+writes `.env.local` and `cypress/fixtures/localnet.json`. It then keeps the
+network running in the foreground until you stop it with `Ctrl+C`.
 
 ## One-time setup
 
@@ -47,7 +49,8 @@ cargo run -p tariorg-cli -- e2e-infra --walletd-auth-method webauthn
 The command pins the tari-ootle / Minotari release versions at the top of
 `tariorg-cli/src/e2e_infra.rs` (`OOTLE_VERSION`, `MINOTARI_VERSION`, etc.).
 Bump them together to move releases. The published template address is written
-straight into `webui/.env.local` as `VITE_TEMPLATE_ADDRESS`.
+straight into `webui/.env.local` as `VITE_TEMPLATE_ADDRESS`, and the funded
+faucet component address as `VITE_FAUCET_ADDRESS`.
 
 The `dao-lifecycle` spec reads `cypress/fixtures/localnet.json` to learn the
 default account's public key (so the account is added as the org's initial
@@ -85,5 +88,6 @@ The UI reads these `VITE_*` environment variables (see `lib/config.ts`):
 | `VITE_NETWORK`          | `Esmeralda`             | `Esmeralda` or `LocalNet`                                                                                                                      |
 | `VITE_INDEXER_URL`      | network default         | Override the indexer URL                                                                                                                       |
 | `VITE_TEMPLATE_ADDRESS` | hardcoded               | Published Organization template address (set by the e2e-infra command)                                                                         |
+| `VITE_FAUCET_ADDRESS`   | unset                   | Demo faucet component address used to fund in-browser accounts (set by the e2e-infra command)                                                  |
 | `VITE_WALLETD_API_KEY`  | unset                   | walletd JSON-RPC API key; when unset, the UI authenticates via the daemon's configured `none`/`webauthn` method (set by the e2e-infra command) |
 | `VITE_WALLETD_TARGET`   | `http://localhost:5100` | walletd proxy target (read by `vite.config.ts`)                                                                                                |

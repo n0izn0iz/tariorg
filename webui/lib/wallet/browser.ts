@@ -1,8 +1,5 @@
 import {
   TransactionBuilder,
-  XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
-  XTR_FAUCET_COMPONENT_ADDRESS,
-  XTR_FAUCET_VAULT_ADDRESS,
   fromHexStr,
   getVaultIdsForAccount,
   microTariLiteral,
@@ -17,11 +14,11 @@ import {
   publicKeyFromSecretKey,
 } from "@tari-project/ootle-wasm";
 import type {
-  SubstateRequirement,
+  InputDeclaration,
   UnsignedTransactionV1,
 } from "@tari-project/ootle-ts-bindings";
 import type { IndexerProvider } from "@tari-project/ootle-indexer";
-import { connectProvider, network } from "../config";
+import { FAUCET_ADDRESS, connectProvider, network } from "../config";
 import { waitForTransaction } from "../transactions";
 import type { AccountSession, WalletAccount } from "./types";
 
@@ -70,17 +67,21 @@ export class BrowserSession implements AccountSession {
   private async resolveInputs(
     provider: IndexerProvider,
     targets: string[],
-  ): Promise<SubstateRequirement[]> {
+  ): Promise<InputDeclaration[]> {
     // Dedupe so a target that is also the active account (e.g. a Send proposal
     // that refunds the depositor) isn't listed twice as an input.
     const ids = Array.from(
       new Set([this.account.componentAddress, ...targets]),
     );
-    const requirements: SubstateRequirement[] = [];
+    const requirements: InputDeclaration[] = [];
     for (const id of ids) {
-      requirements.push({ substate_id: id, version: null });
+      requirements.push({ substate_id: id, version: null, is_write: true });
       for (const vaultId of await getVaultIdsForAccount(provider, id)) {
-        requirements.push({ substate_id: vaultId, version: null });
+        requirements.push({
+          substate_id: vaultId,
+          version: null,
+          is_write: true,
+        });
       }
     }
     return requirements;
@@ -142,6 +143,19 @@ async function faucetAccount(sealKeypair: SealKeypair): Promise<string> {
   const provider = await connectProvider();
   const ownerPublicKeyHex = toHexStr(sealKeypair.public_key);
 
+  // The demo faucet is our own permissionless template: it has no claim NFT,
+  // and its vault id is read from the faucet component's state rather than
+  // hardcoded.
+  const faucetAddress = requireFaucetAddress();
+  const vaultIds = await getVaultIdsForAccount(provider, faucetAddress);
+  if (vaultIds.length === 0) {
+    throw new Error("faucet component has no vault");
+  }
+  const inputs = [
+    { substate_id: faucetAddress, version: null },
+    ...vaultIds.map((id) => ({ substate_id: id, version: null })),
+  ];
+
   const unsigned = new TransactionBuilder(
     network(),
     await resolveMaxEpoch(provider),
@@ -152,7 +166,7 @@ async function faucetAccount(sealKeypair: SealKeypair): Promise<string> {
         .saveVar("account")
         .callMethod(
           {
-            componentAddress: XTR_FAUCET_COMPONENT_ADDRESS,
+            componentAddress: faucetAddress,
             methodName: "take",
           },
           [{ Workspace: "account" }],
@@ -161,11 +175,7 @@ async function faucetAccount(sealKeypair: SealKeypair): Promise<string> {
           microTariLiteral(FAUCET_FEE),
         ]),
     )
-    .withInputs([
-      { substate_id: XTR_FAUCET_COMPONENT_ADDRESS, version: null },
-      { substate_id: XTR_FAUCET_VAULT_ADDRESS, version: null },
-      { substate_id: XTR_FAUCET_CLAIM_RESOURCE_ADDRESS, version: null },
-    ])
+    .withInputs(inputs)
     .buildUnsignedTransaction();
 
   unsigned.is_seal_signer_authorized = true;
@@ -190,4 +200,13 @@ async function faucetAccount(sealKeypair: SealKeypair): Promise<string> {
     throw new Error("faucet claim did not create an account component");
   }
   return created.substate_id;
+}
+
+function requireFaucetAddress(): string {
+  if (!FAUCET_ADDRESS) {
+    throw new Error(
+      "VITE_FAUCET_ADDRESS is not set. Deploy a faucet with `tariorg-cli deploy-faucet` and set VITE_FAUCET_ADDRESS to its component address.",
+    );
+  }
+  return FAUCET_ADDRESS;
 }
