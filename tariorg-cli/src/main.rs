@@ -6,25 +6,29 @@ use crate::want_list::WantList;
 use clap::{CommandFactory, Parser, Subcommand};
 use dialoguer::{Input, Select};
 use ootle_rs::{
-    Epoch, Network, ToAccountAddress, TransactionRequest,
+    Address, Epoch, Network, ToAccountAddress, TransactionRequest,
     builtin_templates::{UnsignedTransactionBuilder, faucet::IFaucet},
+    crypto::StealthCryptoApi,
     key_provider::PrivateKeyProvider,
     keys::OotleSecretKey,
     provider::{IndexerProvider, Provider, ProviderBuilder, WalletProvider},
+    stealth::StealthTransfer,
     wallet::{NetworkWallet, OotleWallet},
 };
 use random_name::generate_name;
 use std::path::{Path, PathBuf};
 use tari_bor::{CborLen, Decode, Encode, minicbor};
-use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+use tari_indexer_client::types::ListUtxosRequest;
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_common_types::engine_types::transaction_receipt::TransactionReceipt;
-use tari_ootle_transaction::{TransactionBuilder, args};
+use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
 use tari_template_lib::macros::rust::collections::{HashMap, HashSet};
 use tari_template_lib::models::Vault;
 use tari_template_lib_types::{
-    Amount, ComponentAddress, ResourceAddress, TemplateAddress, constants::TARI_TOKEN,
-    crypto::RistrettoPublicKeyBytes,
+    Amount, ComponentAddress, ResourceAddress, TemplateAddress, UtxoAddress, UtxoId,
+    constants::TARI_TOKEN,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 use tari_utilities::{ByteArray, hex::Hex};
 use tariorg_types::{Proposal, ProposalAction, Send};
@@ -97,10 +101,19 @@ enum Commands {
     UserInfo,
     /// Show details about the state
     Show,
+    /// Print the deployer account's Ootle address (to fund it with tTARI)
+    Address,
     /// Create a new user
     AddUser,
     /// Deposit an user's tTaris into the organization, TODO: support depositing any resource
     Deposit { amount: f64 },
+    /// Reveal a confidential (stealth) TARI balance back into the deployer account's visible vault
+    Reveal {
+        /// Pedersen commitment (32-byte hex) of the stealth UTXO to reveal. When omitted, all
+        /// stealth UTXOs owned by the account's view key are discovered and revealed.
+        #[arg(long)]
+        commitment: Option<String>,
+    },
     /// Deploy the demo faucet (publish template + create + fund) and save its address
     DeployFaucet {
         /// Path to the faucet WASM
@@ -235,6 +248,11 @@ fn wallet_from_state(state: &State) -> anyhow::Result<OotleWallet> {
 /// transaction declares the last epoch it may be sequenced in; past it, it can never land.
 const MAX_EPOCH_WINDOW: u64 = 10;
 
+/// Revealed µTARI reserved in the fee intent to pay a reveal transaction's fee. A stealth-revealed
+/// fee is not refundable, so this is deliberately small: a single-input reveal costs far less than
+/// this, and the overcharge is kept by validators rather than returned.
+const REVEAL_FEE_BUDGET: u64 = 250_000;
+
 async fn max_epoch(provider: &IndexerProvider<OotleWallet>) -> anyhow::Result<Epoch> {
     let current = provider.get_epoch().await?;
     Ok(Epoch(current.as_u64() + MAX_EPOCH_WINDOW))
@@ -287,6 +305,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Init => cmd_init(&state_path, &mut state).await?,
         Commands::Create => cmd_create(&state_path, &mut state).await?,
         Commands::Show => cmd_show(&state).await?,
+        Commands::Address => cmd_address(&state)?,
         Commands::AddUser => cmd_add_user(&state_path, &mut state).await?,
         Commands::ProposeAddMember { member } => {
             let id = parse_public_key(&member)?;
@@ -305,6 +324,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Execute { proposal_id } => cmd_execute(&mut state, proposal_id).await?,
         Commands::Deposit { amount } => cmd_deposit(&mut state, amount).await?,
+        Commands::Reveal { commitment } => cmd_reveal(&state, commitment).await?,
         Commands::DeployFaucet { wasm, amount } => {
             cmd_deploy_faucet(&state_path, &mut state, wasm, amount).await?
         }
@@ -888,9 +908,9 @@ async fn cmd_user_info(state: &mut State) -> anyhow::Result<()> {
         .connect(&indexer_url)
         .await?;
 
-    let account_addr = provider.default_signer_address().account_public_key();
+    let account_public_key = provider.default_signer_address().account_public_key();
 
-    println!("Public key: {}", account_addr);
+    println!("Public key: {}", account_public_key);
 
     Ok(())
 }
@@ -951,6 +971,211 @@ async fn create_user(
     println!("👤 Created user: {}", user.name);
     state.users.push(user);
     save_state(state_path, state)?;
+    Ok(())
+}
+
+/// Print the deployer account's Ootle address so it can be funded: send tTARI
+/// to this address from wherever you hold testnet funds, then run
+/// `deploy-faucet`.
+fn cmd_address(state: &State) -> anyhow::Result<()> {
+    if !state.is_initialized() {
+        anyhow::bail!("Wallet not initialized. Run `init` first.");
+    }
+    let wallet = wallet_from_state(state)?;
+    println!(
+        "📬 Ootle address (send tTARI here to fund this account): {}",
+        wallet.default_address()
+    );
+    Ok(())
+}
+
+fn view_secret_from_state(state: &State) -> anyhow::Result<RistrettoSecretKey> {
+    let view_bytes = Vec::from_hex(state.view_secret_hex.as_deref().unwrap_or(""))
+        .map_err(|e| anyhow::anyhow!("Invalid view secret hex: {e}"))?;
+    RistrettoSecretKey::from_canonical_bytes(&view_bytes)
+        .map_err(|e| anyhow::anyhow!("Invalid view key: {e}"))
+}
+
+fn parse_commitment(s: &str) -> anyhow::Result<PedersenCommitmentBytes> {
+    PedersenCommitmentBytes::from_hex(s)
+        .map_err(|e| anyhow::anyhow!("Invalid commitment hex {s:?}: {e}"))
+}
+
+async fn cmd_reveal(state: &State, commitment: Option<String>) -> anyhow::Result<()> {
+    if !state.is_initialized() {
+        anyhow::bail!("Wallet not initialized. Run `init` first.");
+    }
+
+    let network = parse_network(&state.network)?;
+    let wallet = wallet_from_state(state)?;
+    let view_secret = view_secret_from_state(state)?;
+    let indexer_url = state.indexer_url.clone();
+
+    let mut provider = ProviderBuilder::new()
+        .wallet(wallet)
+        .connect(&indexer_url)
+        .await?;
+
+    let owner_addr = provider.default_signer_address().clone();
+    let account_addr = owner_addr.to_account_address();
+
+    let commitments = if let Some(c) = commitment {
+        vec![parse_commitment(&c)?]
+    } else {
+        discover_owned_stealth_utxos(&indexer_url, &view_secret)
+            .await?
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect()
+    };
+
+    if commitments.is_empty() {
+        println!("🔍 No owned stealth TARI UTXOs found.");
+        return Ok(());
+    }
+
+    for commitment in commitments {
+        reveal_one(
+            &mut provider,
+            &owner_addr,
+            account_addr,
+            &view_secret,
+            network,
+            commitment,
+        )
+        .await?;
+    }
+
+    println!("✅ Reveal complete. Run `show` to confirm the account balance.");
+    Ok(())
+}
+
+/// Enumerate the currently-unspent TARI stealth UTXOs and return the ones this wallet's view key
+/// can decrypt, as `(commitment, value_µTARI)` pairs. Decrypting each output's AEAD ciphertext is
+/// the ownership test, so this works whether or not the sender stamped a tag on the output.
+async fn discover_owned_stealth_utxos(
+    indexer_url: &str,
+    view_secret: &RistrettoSecretKey,
+) -> anyhow::Result<Vec<(PedersenCommitmentBytes, u64)>> {
+    let client = tari_indexer_client::connect_rest(indexer_url)?;
+    let crypto = StealthCryptoApi::new();
+    let mut owned = Vec::new();
+
+    // Paginate through the indexer's UTXO list (`from_id` is an exclusive cursor, keyed by UtxoId).
+    let mut from_id: Option<UtxoId> = None;
+    loop {
+        let resp = client
+            .list_utxos(ListUtxosRequest {
+                resource_address: TARI_TOKEN,
+                limit: 1000,
+                from_id,
+            })
+            .await?;
+        if resp.utxos.is_empty() {
+            break;
+        }
+        for (utxo_id, utxo) in resp.utxos {
+            from_id = Some(utxo_id);
+            let Some(output) = utxo.output() else {
+                continue;
+            };
+            let body = output.output();
+            let nonce = RistrettoPublicKey::from_canonical_bytes(body.public_nonce.as_bytes())
+                .map_err(|e| anyhow::anyhow!("Invalid stealth output public nonce: {e}"))?;
+            let commitment = utxo_id.into_commitment_bytes();
+            // Decryption succeeding is what proves the output belongs to this view key.
+            if let Ok(decrypted) = crypto.decrypt_utxo_data(
+                &body.encrypted_data,
+                &commitment,
+                view_secret,
+                &nonce,
+                true,
+            ) {
+                owned.push((commitment, decrypted.value()));
+            }
+        }
+    }
+
+    Ok(owned)
+}
+
+/// Reveal one stealth UTXO: spend it and turn its value into a visible account balance, revealing
+/// a small slice to pay the transaction fee.
+async fn reveal_one(
+    provider: &mut IndexerProvider<OotleWallet>,
+    owner_addr: &Address,
+    account_addr: ComponentAddress,
+    view_secret: &RistrettoSecretKey,
+    network: Network,
+    commitment: PedersenCommitmentBytes,
+) -> anyhow::Result<()> {
+    let utxo_addr = UtxoAddress::new(TARI_TOKEN, UtxoId::from(commitment));
+    let substate = provider.fetch_substate(utxo_addr.clone()).await?;
+    let utxo = substate
+        .substate_value()
+        .as_utxo()
+        .ok_or_else(|| anyhow::anyhow!("Substate at {utxo_addr} is not a UTXO"))?;
+    let output = utxo
+        .output()
+        .ok_or_else(|| anyhow::anyhow!("UTXO at {utxo_addr} is burnt"))?;
+    let body = output.output();
+    let nonce = RistrettoPublicKey::from_canonical_bytes(body.public_nonce.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Invalid stealth output public nonce: {e}"))?;
+    let decrypted = StealthCryptoApi::new()
+        .decrypt_utxo_data(&body.encrypted_data, &commitment, view_secret, &nonce, true)
+        .map_err(|e| {
+            anyhow::anyhow!("Failed to decrypt stealth UTXO (is it owned by this account?): {e}")
+        })?;
+    let value = decrypted.value();
+
+    if value <= REVEAL_FEE_BUDGET {
+        anyhow::bail!(
+            "Stealth UTXO value ({value} µTARI) is not enough to cover the {REVEAL_FEE_BUDGET} µTARI reveal fee"
+        );
+    }
+
+    // Spend the stealth input and reveal its full value. With only a stealth input (no revealed
+    // input) the transfer seals with the input's one-time key, so the revealed bucket is keyed to
+    // that key; we deposit it into the account (`deposit` is AllowAll) and pay the fee from a small
+    // slice taken off the top.
+    let (statement, requirements) = StealthTransfer::new(TARI_TOKEN, provider)
+        .spend_stealth_input(owner_addr.clone(), commitment)
+        .to_revealed_output(value)
+        .prepare()
+        .await?;
+
+    let account_public_key = provider.default_signer_address().account_public_key();
+
+    let max_epoch = max_epoch(provider).await?;
+    let unsigned = Transaction::builder(network, max_epoch)
+        .with_fee_instructions_builder(|b| {
+            b.stealth_transfer(TARI_TOKEN, statement)
+                .put_last_instruction_output_on_workspace("revealed")
+                .take_from_bucket("revealed", REVEAL_FEE_BUDGET, "fee")
+                .pay_fee_from_bucket("fee")
+                .create_account(*account_public_key)
+                .call_method(account_addr, "deposit", args![Workspace("revealed")])
+        })
+        .add_input(UtxoAddress::new(TARI_TOKEN, UtxoId::from(commitment)))
+        .build_unsigned();
+
+    let authorizer = provider.wallet().stealth_authorizer(requirements);
+    let tx = TransactionRequest::default()
+        .with_transaction(unsigned)
+        .build(&authorizer)
+        .await?;
+
+    let pending = provider.send_transaction(tx).await?;
+    println!("⏳ Reveal transaction submitted: {}", pending.tx_id());
+    let outcome = pending.watch().await?;
+    println!("🏁 Outcome: {outcome}");
+    if let Some(reason) = outcome.reject_reason() {
+        anyhow::bail!("❌ Transaction rejected: {reason}");
+    }
+    let receipt = pending.get_receipt().await?;
+    let _ = receipt;
+    println!("💧 Revealed {value} µTARI into account {account_addr}");
+
     Ok(())
 }
 

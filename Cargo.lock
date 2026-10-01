@@ -4908,6 +4908,7 @@ dependencies = [
  "sha2 0.10.9",
  "tari_bor",
  "tari_crypto",
+ "tari_indexer_client",
  "tari_ootle_common_types",
  "tari_ootle_transaction",
  "tari_template_lib",

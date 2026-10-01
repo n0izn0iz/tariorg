@@ -43,7 +43,9 @@ export const ORGANIZATION_TEMPLATE_ADDRESS: string =
  * Override with `VITE_FAUCET_ADDRESS`. `tariorg-cli e2e-infra` sets this on
  * LocalNet too, so the e2e suite exercises the same custom-faucet path.
  */
-export const FAUCET_ADDRESS: string | undefined = env("VITE_FAUCET_ADDRESS");
+export const FAUCET_ADDRESS: string | undefined =
+  env("VITE_FAUCET_ADDRESS") ||
+  "component_89db9758d189fc7a969a1718b68cddcc9cbff5992f44a92a6e3bda5625727844";
 
 /**
  * Optional API key used to authenticate against the wallet daemon JSON-RPC
